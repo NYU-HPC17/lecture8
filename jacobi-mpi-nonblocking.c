@@ -60,6 +60,7 @@ int main(int argc, char * argv[])
   /* Allocation of vectors, including left and right ghost points */
   double * lu    = (double *) calloc(sizeof(double), lN + 2);
   double * lunew = (double *) calloc(sizeof(double), lN + 2);
+  double * lutemp;
 
   double h = 1.0 / (N + 1);
   double hsq = h * h;
@@ -105,8 +106,8 @@ int main(int argc, char * argv[])
       MPI_Wait(&request_in2, &status);
     }
 
-    /* copy new_u onto u */
-    memcpy(lu, lunew, (lN+2)*sizeof(double));
+    /* copy newu to u using pointer flipping */
+    lutemp = lu; lu = lunew; lunew = lutemp;
     if (0 == (iter % 10)) {
       gres = compute_residual(lu, lN, invhsq);
       if (0 == mpirank) {

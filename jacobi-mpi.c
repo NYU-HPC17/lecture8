@@ -28,9 +28,7 @@ double compute_residual(double *lu, int lN, double invhsq)
 int main(int argc, char * argv[])
 {
   int mpirank, i, p, N, lN, iter, max_iters;
-  MPI_Status status;
-  MPI_Request request_out1, request_in1;
-  MPI_Request request_out2, request_in2;
+  MPI_Status status, status1;
 
   MPI_Init(&argc, &argv);
   MPI_Comm_rank(MPI_COMM_WORLD, &mpirank);
@@ -57,7 +55,7 @@ int main(int argc, char * argv[])
   timestamp_type time1, time2;
   get_timestamp(&time1);
 
-  /* Allocation of vectors, including left and right ghost points */
+  /* Allocation of vectors, including left/upper and right/lower ghost points */
   double * lu    = (double *) calloc(sizeof(double), lN + 2);
   double * lunew = (double *) calloc(sizeof(double), lN + 2);
   double * lutemp;
@@ -72,39 +70,24 @@ int main(int argc, char * argv[])
   gres = gres0;
 
   for (iter = 0; iter < max_iters && gres/gres0 > tol; iter++) {
-    /* interleaf computation and communication: compute the first
-     * and last value, which are communicated with non-blocking
-     * send/recv. During that communication, do all the local work */
 
-    /* Jacobi step for the left and right most points */
-    lunew[1]  = 0.5 * (hsq + lu[0] + lu[2]);
-    lunew[lN] = 0.5 * (hsq + lu[lN-1] + lu[lN+1]);
-
-    if (mpirank < p - 1) {
-      /* If not the last process, send/recv bdry values to the right */
-      MPI_Irecv(&(lunew[lN+1]), 1, MPI_DOUBLE, mpirank+1, 123, MPI_COMM_WORLD, &request_in1);
-      MPI_Isend(&(lunew[lN]), 1, MPI_DOUBLE, mpirank+1, 124, MPI_COMM_WORLD, &request_out1);
-    }
-    if (mpirank > 0) {
-      /* If not the first process, send/recv bdry values to the left */
-      MPI_Irecv(&(lunew[0]), 1, MPI_DOUBLE, mpirank-1, 124, MPI_COMM_WORLD, &request_in2);
-      MPI_Isend(&(lunew[1]), 1, MPI_DOUBLE, mpirank-1, 123, MPI_COMM_WORLD, &request_out2);
-    }
-
-    /* Jacobi step for all the inner points */
-    for (i = 2; i < lN; i++){
+    /* Jacobi step for local points */
+    for (i = 1; i <= lN; i++){
       lunew[i]  = 0.5 * (hsq + lu[i - 1] + lu[i + 1]);
     }
 
-    /* check if Isend/Irecv are done */
+    /* communicate ghost values */
     if (mpirank < p - 1) {
-      MPI_Wait(&request_out1, &status);
-      MPI_Wait(&request_in1, &status);
+      /* If not the last process, send/recv bdry values to the right */
+      MPI_Send(&(lunew[lN]), 1, MPI_DOUBLE, mpirank+1, 124, MPI_COMM_WORLD);
+      MPI_Recv(&(lunew[lN+1]), 1, MPI_DOUBLE, mpirank+1, 123, MPI_COMM_WORLD, &status);
     }
     if (mpirank > 0) {
-      MPI_Wait(&request_out2, &status);
-      MPI_Wait(&request_in2, &status);
+      /* If not the first process, send/recv bdry values to the left */
+      MPI_Send(&(lunew[1]), 1, MPI_DOUBLE, mpirank-1, 123, MPI_COMM_WORLD);
+      MPI_Recv(&(lunew[0]), 1, MPI_DOUBLE, mpirank-1, 124, MPI_COMM_WORLD, &status1);
     }
+
 
     /* copy newu to u using pointer flipping */
     lutemp = lu; lu = lunew; lunew = lutemp;
